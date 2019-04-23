@@ -1,0 +1,52 @@
+CY_decile <- sqlQuery(mycon, "select distinct(New_Cust_Group_Code)[cust_code], sum(order_MSRP_dlrs)[MSRP], count(distinct(orig_order_num))[ords],  sum(order_cost_dlrs)[cogs], sum(order_sold_dlrs)[dlrs], sum(order_units)[units] from hadm_fact_order
+                          inner join ha_report.dbo.New_customer_Code_Map_new on ha_report.dbo.New_customer_Code_Map_new.cust_key = hadm_fact_order.cust_billto_key
+                          inner JOIN hadm_customer on hadm_customer.cust_key=hadm_fact_order.cust_billto_key
+                          Inner join hadm_date_calendar on hadm_date_calendar.date_key=hadm_fact_order.date_key
+                          inner join hadm_channel on hadm_channel.channel_key = hadm_fact_order.channel_key
+                          where date_date between '2019-03-10' and '2019-04-06' and cust_type_code != 9 and not(order_type IN ('Amazon','Outlet'))
+                          group by New_Cust_Group_Code
+						              order by dlrs desc")
+
+PY_decile <- sqlQuery(mycon, "select distinct(New_Cust_Group_Code)[cust_code], sum(order_MSRP_dlrs)[MSRP], count(distinct(orig_order_num))[ords], sum(order_cost_dlrs)[cogs], sum(order_sold_dlrs)[dlrs], sum(order_units)[units] from hadm_fact_order
+  						        inner join ha_report.dbo.New_customer_Code_Map_new on ha_report.dbo.New_customer_Code_Map_new.cust_key = hadm_fact_order.cust_billto_key
+                      inner JOIN hadm_customer on hadm_customer.cust_key=hadm_fact_order.cust_billto_key
+                      Inner join hadm_date_calendar on hadm_date_calendar.date_key=hadm_fact_order.date_key
+                      inner join hadm_channel on hadm_channel.channel_key = hadm_fact_order.channel_key
+                      where date_date between '2018-03-11' and '2018-04-07' and cust_type_code != 9 and not(order_type IN ('Amazon','Outlet'))
+                      group by New_Cust_Group_Code
+                      order by dlrs desc")
+
+#Creating Decile based on $>0 filter & eliminating some internal account numbers
+CY_decile <- filter(CY_decile, CY_decile$dlrs > 0 & CY_decile$cust_code > 1000)
+CY_decile <- CY_decile %>%
+             mutate(quantile = ntile(dlrs, 10))
+
+PY_decile <- filter(PY_decile, PY_decile$dlrs > 0 & PY_decile$cust_code > 1000)
+PY_decile <- PY_decile %>%
+               mutate(quantile = ntile(dlrs, 10))
+
+#summarizing decile
+CY_decile_rollup <- CY_decile %>%
+  select(cust_code, ords, dlrs, units, quantile, MSRP, cogs) %>%
+  group_by(quantile) %>%
+  summarise(cust_code = n(), MSRP = sum(MSRP), ords = sum(ords), dlrs = sum(dlrs), units = sum(units), cogs = sum(cogs))
+
+PY_decile_rollup <- PY_decile %>%
+  select(cust_code, ords, dlrs, units, quantile, MSRP, cogs) %>%
+  group_by(quantile) %>%
+  summarise(cust_code = n(), MSRP = sum(MSRP), ords = sum(ords), dlrs = sum(dlrs), units = sum(units), cogs = sum(cogs))
+
+##Adding Metrics
+CY_decile_rollup <- CY_decile_rollup[order(-CY_decile_rollup$quantile),]
+CY_decile_rollup <- rbind(CY_decile_rollup, colSums(CY_decile_rollup))
+CY_decile_rollup$AOV <- CY_decile_rollup$dlrs / CY_decile_rollup$ords
+CY_decile_rollup$UPT <- CY_decile_rollup$units / CY_decile_rollup$ords
+CY_decile_rollup$AUR <- CY_decile_rollup$dlrs / CY_decile_rollup$units
+CY_decile_rollup$dlr_per_cust <- CY_decile_rollup$dlrs / CY_decile_rollup$cust_code
+
+PY_decile_rollup <- PY_decile_rollup[order(-PY_decile_rollup$quantile),]
+PY_decile_rollup <- rbind(PY_decile_rollup, colSums(PY_decile_rollup))
+PY_decile_rollup$AOV <- PY_decile_rollup$dlrs / PY_decile_rollup$ords
+PY_decile_rollup$UPT <- PY_decile_rollup$units / PY_decile_rollup$ords
+PY_decile_rollup$AUR <- PY_decile_rollup$dlrs / PY_decile_rollup$units
+PY_decile_rollup$dlr_per_cust <- PY_decile_rollup$dlrs / PY_decile_rollup$cust_code
